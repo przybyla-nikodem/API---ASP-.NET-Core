@@ -1,5 +1,8 @@
 ﻿using API___ASP_.NET_Core.Models;
 using API___ASP_.NET_Core.Repositories;
+using API___ASP_.NET_Core.Validators;
+using FluentValidation;
+using FluentValidation.Results;
 using Microsoft.AspNetCore.Cryptography.KeyDerivation;
 using Microsoft.AspNetCore.Mvc;
 using System.Net.Mail;
@@ -24,56 +27,28 @@ namespace API___ASP_.NET_Core.Controllers
         public async Task <IActionResult> Register([FromBody] Register newUserData)
         {
             User dbUser;
+            UserRegisterValidator validator = new UserRegisterValidator();
 
-            if (newUserData == null || string.IsNullOrEmpty(newUserData.Password) || string.IsNullOrEmpty(newUserData.Email))
+            ValidationResult results = validator.Validate(newUserData);
+            if (!results.IsValid)
             {
-                return BadRequest(new { Message = "Dane wejściowe nie mogą być puste." });
-            }
-
-            try
-            {
-                var mail = new MailAddress(newUserData.Email);
-            }
-            catch
-            {
-                return BadRequest(new { Message = "Format adresu email jest niepoprawny." });
-            }
-
-            if (hasSpecial(newUserData.Name))
-            {
-                return BadRequest(new { Message = "Niepoprawne znaki w imieniu" });
-            }
-            else if (hasSpecial(newUserData.Surname))
-            {
-                return BadRequest(new { Message = "Niepoprawne znaki w nazwisku" });
-            }
-
-            if (!DateOnly.TryParseExact(newUserData.Birthday, "yyyy-MM-dd", out var parsedDate))
-            {
-                return BadRequest(new { Message = "Błędny format daty. Użyj formatu YYYY-MM-DD." });
+                return BadRequest(new { Message = results.Errors[0].ErrorMessage });
             }
 
             byte[] salt = RandomNumberGenerator.GetBytes(128 / 8);
 
             string hashed = HashPassword(newUserData.Password!, salt);
 
-            try
+            dbUser = new User
             {
-                dbUser = new User
-                {
-                    Username = newUserData.UserName,
-                    Name = newUserData.Name,
-                    Surname = newUserData.Surname,
-                    Email = newUserData.Email,
-                    Password = hashed,
-                    passwordSalt = salt,
-                    Birthday = newUserData.Birthday
-                };
-            }
-            catch (Exception ex)
-            {
-                return BadRequest(new { Message = "Nie udało się zarejestrować" });
-            }
+                Username = newUserData.Username,
+                Name = newUserData.Name,
+                Surname = newUserData.Surname,
+                Email = newUserData.Email,
+                Password = hashed,
+                passwordSalt = salt,
+                Birthday = newUserData.Birthday
+            };
 
             try
             {
@@ -94,9 +69,12 @@ namespace API___ASP_.NET_Core.Controllers
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] Login loginData)
         {
-            if (loginData == null || string.IsNullOrEmpty(loginData.Email) || string.IsNullOrEmpty(loginData.Password))
+            UserLoginValidator validator = new UserLoginValidator();
+            ValidationResult results = validator.Validate(loginData);
+
+            if (!results.IsValid)
             {
-                return BadRequest(new { Message = "Email i hasło są wymagane." });
+                return BadRequest(new { Message = results.Errors[0].ErrorMessage });
             }
 
             User? user = await _userRepository.GetByEmailAsync(loginData.Email);
@@ -125,14 +103,9 @@ namespace API___ASP_.NET_Core.Controllers
         [HttpPatch("edit")]
         public async Task<IActionResult> Alter([FromBody] Edit editData)
         {
-            if (editData == null || string.IsNullOrEmpty(editData.Password) || string.IsNullOrEmpty(editData.Username))
+            if (editData == null)
             {
-                return BadRequest(new { Message = "Hasło i nazwa użytkownika nie mogą być puste" });
-            }
-
-            if (!DateOnly.TryParseExact(editData.Birthday, "yyyy-MM-dd", out var parsedDate))
-            {
-                return BadRequest(new { Message = "Błędny format daty. Użyj formatu YYYY-MM-DD." });
+                return BadRequest(new { Message = "Dane wejściowe nie mogą być puste." });
             }
 
             User? userDb = await _userRepository.GetByUsernameAsync(editData.Username);
@@ -145,35 +118,12 @@ namespace API___ASP_.NET_Core.Controllers
                 return BadRequest(new { Message = "Nieprawidłowe hasło" });
             }
 
-            if (string.IsNullOrEmpty(editData.newUsername) && string.IsNullOrEmpty(editData.Name) &&
-                string.IsNullOrEmpty(editData.Surname) && string.IsNullOrEmpty(editData.Email) &&
-                string.IsNullOrEmpty(editData.Birthday))
-            {
-                return BadRequest(new { Message = "Brak danych do zmiany." });
-            }
+            UserEditValidator validator = new UserEditValidator();
+            ValidationResult results = validator.Validate(editData);
 
-            if ((string.IsNullOrEmpty(editData.newUsername) || editData.newUsername == userDb.Username) &&
-                (string.IsNullOrEmpty(editData.Name) || editData.Name == userDb.Name) &&
-                (string.IsNullOrEmpty(editData.Surname) || editData.Surname == userDb.Surname) &&
-                (string.IsNullOrEmpty(editData.Email) || editData.Email == userDb.Email) &&
-                (string.IsNullOrEmpty(editData.Birthday) || editData.Birthday == userDb.Birthday))
+            if(!results.IsValid)
             {
-                return BadRequest(new { Message = "Przesłane dane są identyczne z aktualnymi. Nic nie zmieniono." });
-            }
-
-            if (!string.IsNullOrEmpty(editData.Email) && !Regex.IsMatch(editData.Email, @"@.*\."))
-            {
-                return BadRequest(new { Message = "Format nowego adresu email jest niepoprawny" });
-            }
-
-            if (!string.IsNullOrEmpty(editData.Name) && hasSpecial(editData.Name))
-            {
-                return BadRequest(new { Message = "Niepoprawne znaki w nowym imieniu" });
-            }
-
-            if (!string.IsNullOrEmpty(editData.Surname) && hasSpecial(editData.Surname))
-            {
-                return BadRequest(new { Message = "Niepoprawne znaki w nowym nazwisku" });
+                return BadRequest(new { Message = results.Errors[0].ErrorMessage });
             }
 
             var tempNewUsername = !string.IsNullOrEmpty(editData.newUsername) ? editData.newUsername : userDb.Username;
@@ -246,17 +196,6 @@ namespace API___ASP_.NET_Core.Controllers
             {
                 return BadRequest(new { Message = "Nie udało się zweryfikować danych" });
             }
-        }
-
-        private bool hasSpecial(string s)
-        {
-            if (string.IsNullOrEmpty(s)) return false;
-
-            if (Regex.IsMatch(s, @"[^a-zA-ZąęćńóśłźżĄĘĆŃÓŚŁŹŻ]"))
-            {
-                return true;
-            }
-            return false;
         }
 
         private string HashPassword(string password, byte[] salt)
