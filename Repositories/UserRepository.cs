@@ -18,7 +18,7 @@ namespace API___ASP_.NET_Core.Repositories
             using (var connection = new SqliteConnection(_connectionString))
             {
                 string sql = "Select * from user where email = @Email";
-                return connection.QueryFirstOrDefault<User>(sql, new { Email = email };
+                return connection.QueryFirstOrDefault<User>(sql, new { Email = email });
             }
         }
 
@@ -27,11 +27,11 @@ namespace API___ASP_.NET_Core.Repositories
             using (var connection = new SqliteConnection(_connectionString))
             {
                 string sql = "Select * from user where username = @Username";
-                return connection.QueryFirstOrDefault<User>(sql, new { Username = username };
+                return connection.QueryFirstOrDefault<User>(sql, new { Username = username });
             }
         }
 
-        public void AddUser(User user)
+        public void addUser(User user)
         {
             using(var connection = new SqliteConnection(_connectionString))
             {

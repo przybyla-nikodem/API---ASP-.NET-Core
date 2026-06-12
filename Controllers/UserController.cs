@@ -1,18 +1,9 @@
 ﻿using API___ASP_.NET_Core.Models;
-using Dapper;
-using Microsoft.AspNetCore.Authorization;
+using API___ASP_.NET_Core.Repositories;
 using Microsoft.AspNetCore.Cryptography.KeyDerivation;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.Sqlite;
-using Microsoft.Extensions.Configuration;
-using Microsoft.IdentityModel.Tokens;
-using System.Collections.Generic;
-using System.IdentityModel.Tokens.Jwt;
 using System.Net.Mail;
-using System.Security.Claims;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.RegularExpressions;
 
 namespace API___ASP_.NET_Core.Controllers
@@ -21,11 +12,11 @@ namespace API___ASP_.NET_Core.Controllers
     [ApiController]
     public class UserController : ControllerBase
     {
-        private readonly string _connectionString;
+        private readonly IUserRepository _userRepository;
 
-        public UserController(IConfiguration configuration)
+        public UserController(IUserRepository userRepository)
         {
-            _connectionString = configuration.GetConnectionString("DefaultConnection")!;
+            _userRepository = userRepository;
         }
 
         [HttpPost("register")]
@@ -83,26 +74,21 @@ namespace API___ASP_.NET_Core.Controllers
                     passwordSalt = salt,
                     Birthday = newUserData.Birthday
                 };
-            } 
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { Message = "Nie udało się zarejestrować" });
             }
 
-            using(var connection = new SqliteConnection(_connectionString))
+            try
             {
-                string sql = @"insert into user (Name, Surname, Username, Email, Password, passwordSalt, Birthday) values
-                                (@Name, @Surname, @Username, @Email, @Password, @passwordSalt, @Birthday);";
-
-                try
-                {
-                    connection.Execute(sql, dbUser);
-                } catch (Exception ex)
-                {
-                    return BadRequest(new { Message = "Nie udało się zarejestrować" });
-                }
-            }
+                _userRepository.addUser(dbUser);
                 return StatusCode(StatusCodes.Status201Created, new { Message = "Rejestracja przebiegła pomyślnie" });
+            }
+            catch
+            {
+                return BadRequest(new { Message = "Rejestracja nie udała się" });
+            }
         }
 
         [HttpPost("login")]
@@ -113,31 +99,26 @@ namespace API___ASP_.NET_Core.Controllers
                 return BadRequest(new { Message = "Email i hasło są wymagane." });
             }
 
-            using (var connection = new SqliteConnection(_connectionString))
+            User? user = _userRepository.GetByEmail(loginData.Email);
+
+            if (user == null)
             {
-                string sql = "select * from user where Email = @Email";
+                return BadRequest(new { Message = "Ten email nie jest używany przez żadnego użytkownika" });
+            }
 
-                User user = connection.QueryFirstOrDefault<User>(sql, new { Email = loginData.Email })!;
+            string hashed = HashPassword(loginData.Password, user.passwordSalt);
 
-                if(user == null)
+            if (user.Password == hashed)
+            {
+                return Ok(new
                 {
-                    return BadRequest(new { Message = "Ten email nie jest używany przez żadnego użytkownika" });
-                }
-
-                string hashed = HashPassword(loginData.Password, user.passwordSalt);
-
-                if (user.Password == hashed)
-                {
-                    return Ok(new
-                    {
-                        Message = "Zalogowano pomyślnie",
-                        User = new { user.Id, user.Username, user.Email }
-                    });
-                }
-                else
-                {
-                    return BadRequest(new { Message = "Nieprawidłowy email lub hasło." });
-                }
+                    Message = "Zalogowano pomyślnie",
+                    User = new { user.Id, user.Username, user.Email }
+                });
+            }
+            else
+            {
+                return BadRequest(new { Message = "Nieprawidłowy email lub hasło." });
             }
         }
 
@@ -149,80 +130,67 @@ namespace API___ASP_.NET_Core.Controllers
                 return BadRequest(new { Message = "Hasło i nazwa użytkownika nie mogą być puste" });
             }
 
-            using (var connection = new SqliteConnection(_connectionString))
+            User? userDb = _userRepository.GetByUsername(editData.Username);
+
+            if (userDb == null) return BadRequest(new { Message = "Brak uzytkownika" });
+
+            string hashed = HashPassword(editData.Password, userDb.passwordSalt);
+            if (hashed != userDb.Password)
             {
-                string sqlUser = "select * from user where Username = @username";
-                User userDb = connection.QueryFirstOrDefault<User>(sqlUser, new { username = editData.Username })!;
+                return BadRequest(new { Message = "Nieprawidłowe hasło" });
+            }
 
-                if (userDb == null) return BadRequest("Ten użytkownik nie istnieje");
+            if (string.IsNullOrEmpty(editData.newUsername) && string.IsNullOrEmpty(editData.Name) &&
+                string.IsNullOrEmpty(editData.Surname) && string.IsNullOrEmpty(editData.Email) &&
+                string.IsNullOrEmpty(editData.Birthday))
+            {
+                return BadRequest(new { Message = "Brak danych do zmiany." });
+            }
 
-                string hashed = HashPassword(editData.Password, userDb.passwordSalt);
-                if (hashed != userDb.Password)
-                {
-                    return BadRequest(new { Message = "Nieprawidłowe hasło" });
-                }
+            if ((string.IsNullOrEmpty(editData.newUsername) || editData.newUsername == userDb.Username) &&
+                (string.IsNullOrEmpty(editData.Name) || editData.Name == userDb.Name) &&
+                (string.IsNullOrEmpty(editData.Surname) || editData.Surname == userDb.Surname) &&
+                (string.IsNullOrEmpty(editData.Email) || editData.Email == userDb.Email) &&
+                (string.IsNullOrEmpty(editData.Birthday) || editData.Birthday == userDb.Birthday))
+            {
+                return BadRequest(new { Message = "Przesłane dane są identyczne z aktualnymi. Nic nie zmieniono." });
+            }
 
-                if (string.IsNullOrEmpty(editData.newUsername) && string.IsNullOrEmpty(editData.Name) &&
-                    string.IsNullOrEmpty(editData.Surname) && string.IsNullOrEmpty(editData.Email) &&
-                    string.IsNullOrEmpty(editData.Birthday))
-                {
-                    return BadRequest(new { Message = "Brak danych do zmiany." });
-                }
+            if (!string.IsNullOrEmpty(editData.Email) && !Regex.IsMatch(editData.Email, @"@.*\."))
+            {
+                return BadRequest(new { Message = "Format nowego adresu email jest niepoprawny" });
+            }
 
-                if ((string.IsNullOrEmpty(editData.newUsername) || editData.newUsername == userDb.Username) &&
-                    (string.IsNullOrEmpty(editData.Name) || editData.Name == userDb.Name) &&
-                    (string.IsNullOrEmpty(editData.Surname) || editData.Surname == userDb.Surname) &&
-                    (string.IsNullOrEmpty(editData.Email) || editData.Email == userDb.Email) &&
-                    (string.IsNullOrEmpty(editData.Birthday) || editData.Birthday == userDb.Birthday))
-                {
-                    return BadRequest(new { Message = "Przesłane dane są identyczne z aktualnymi. Nic nie zmieniono." });
-                }
+            if (!string.IsNullOrEmpty(editData.Name) && hasSpecial(editData.Name))
+            {
+                return BadRequest(new { Message = "Niepoprawne znaki w nowym imieniu" });
+            }
 
-                if (!string.IsNullOrEmpty(editData.Email) && !Regex.IsMatch(editData.Email, @"@.*\."))
-                {
-                    return BadRequest(new { Message = "Format nowego adresu email jest niepoprawny" });
-                }
+            if (!string.IsNullOrEmpty(editData.Surname) && hasSpecial(editData.Surname))
+            {
+                return BadRequest(new { Message = "Niepoprawne znaki w nowym nazwisku" });
+            }
 
-                if (!string.IsNullOrEmpty(editData.Name) && hasSpecial(editData.Name))
-                {
-                    return BadRequest(new { Message = "Niepoprawne znaki w nowym imieniu" });
-                }
+            var tempNewUsername = !string.IsNullOrEmpty(editData.newUsername) ? editData.newUsername : userDb.Username;
+            var tempNewName = !string.IsNullOrEmpty(editData.Name) ? editData.Name : userDb.Name;
+            var tempNewSurname = !string.IsNullOrEmpty(editData.Surname) ? editData.Surname : userDb.Surname;
+            var tempNewEmail = !string.IsNullOrEmpty(editData.Email) ? editData.Email : userDb.Email;
+            var tempNewBirthday = !string.IsNullOrEmpty(editData.Birthday) ? editData.Birthday : userDb.Birthday;
 
-                if (!string.IsNullOrEmpty(editData.Surname) && hasSpecial(editData.Surname))
-                {
-                    return BadRequest(new { Message = "Niepoprawne znaki w nowym nazwisku" });
-                }
+            userDb.Username = tempNewUsername;
+            userDb.Name = tempNewName;
+            userDb.Surname = tempNewSurname;
+            userDb.Email = tempNewEmail;
+            userDb.Birthday = tempNewBirthday;
 
-                var tempNewUsername = !string.IsNullOrEmpty(editData.newUsername) ? editData.newUsername : userDb.Username;
-                var tempNewName = !string.IsNullOrEmpty(editData.Name) ? editData.Name : userDb.Name;
-                var tempNewSurname = !string.IsNullOrEmpty(editData.Surname) ? editData.Surname : userDb.Surname;
-                var tempNewEmail = !string.IsNullOrEmpty(editData.Email) ? editData.Email : userDb.Email;
-                var tempNewBirthday = !string.IsNullOrEmpty(editData.Birthday) ? editData.Birthday : userDb.Birthday;
-
-                string sqlAlter = @"update user set
-                                    Name = @Name,
-                                    Surname = @Surname,
-                                    Email = @Email,
-                                    Username = @Username,   
-                                    Birthday = @Birthday 
-                                    where Id = @Id";
-                try
-                {
-                    connection.Execute(sqlAlter, new
-                    {
-                        Username = tempNewUsername,
-                        Name = tempNewName,
-                        Surname = tempNewSurname,
-                        Birthday = tempNewBirthday,
-                        Email = tempNewEmail,
-                        Id = userDb.Id
-                    });
-                    return Ok(new { Message = "Dane zmienione pomyślnie" });
-                }
-                catch (Exception ex)
-                {
-                    return BadRequest($"Błąd zapisu danych do bazy");
-                }
+            try
+            {
+                _userRepository.updateUser(userDb);
+                return Ok(new { Message = "Dane zmienione pomyślnie" });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest($"Błąd zapisu danych do bazy");
             }
         }
 
@@ -234,12 +202,11 @@ namespace API___ASP_.NET_Core.Controllers
                 return BadRequest(new { Message = "Brak użytkownika" });
             }
 
-            using (var connection = new SqliteConnection(_connectionString))
+            try
             {
-                string sql = "select * from user where Username = @username";
-                User dbUser = connection.QueryFirstOrDefault<User>(sql, new { username = username });
+                User? dbUser = _userRepository.GetByUsername(username);
 
-                if(dbUser == null)
+                if (dbUser == null)
                 {
                     return NotFound("Użytkownik nie istnieje.");
                 }
@@ -258,6 +225,10 @@ namespace API___ASP_.NET_Core.Controllers
                 {
                     return StatusCode(StatusCodes.Status403Forbidden, new { Message = "Nie masz > 18 lat" });
                 }
+            }
+            catch
+            {
+                return BadRequest(new { Message = "Nie udało się zweryfikować danych" });
             }
         }
 

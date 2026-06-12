@@ -1,4 +1,5 @@
-﻿namespace API___ASP_.NET_Core.Repositories
+﻿using API___ASP_.NET_Core.Models;
+namespace API___ASP_.NET_Core.Repositories
 {
     public interface IUserRepository
     {
