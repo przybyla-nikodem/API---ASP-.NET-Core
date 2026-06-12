@@ -3,9 +3,9 @@ namespace API___ASP_.NET_Core.Repositories
 {
     public interface IUserRepository
     {
-        User? GetByEmail(string email);
-        User? GetByUsername(string username);
-        void addUser(User user);
-        void updateUser(User user);
+        Task<User?> GetByEmailAsync(string email);
+        Task<User?> GetByUsernameAsync(string username);
+        Task<bool> addUserAsync(User user);
+        Task<bool> updateUserAsync(User user);
     }
 }

@@ -13,40 +13,51 @@ namespace API___ASP_.NET_Core.Repositories
             _connectionString = configuration.GetConnectionString("DefaultConnection");
         }
 
-        public User? GetByEmail(string email)
+        public async Task<User?> GetByEmailAsync(string email)
         {
             using (var connection = new SqliteConnection(_connectionString))
             {
-                string sql = "Select * from user where email = @Email";
-                return connection.QueryFirstOrDefault<User>(sql, new { Email = email });
+                string sql = "SELECT Id, Name, Surname, Email, Password, PasswordSalt, Birthday FROM user WHERE Email = @Email";
+                return await connection.QueryFirstOrDefaultAsync<User>(sql, new { Email = email });
             }
         }
 
-        public User? GetByUsername(string username)
+        public async Task<User?> GetByUsernameAsync(string username)
         {
             using (var connection = new SqliteConnection(_connectionString))
             {
-                string sql = "Select * from user where username = @Username";
-                return connection.QueryFirstOrDefault<User>(sql, new { Username = username });
+                string sql = "SELECT Id, Name, Surname, Email, Password, PasswordSalt, Birthday FROM user WHERE username = @Username";
+                return await connection.QueryFirstOrDefaultAsync<User>(sql, new { Username = username });
             }
         }
 
-        public void addUser(User user)
+        public async Task<bool> addUserAsync(User user)
         {
-            using(var connection = new SqliteConnection(_connectionString))
+            try
             {
-                string sql = @"INSERT INTO user (Name, Surname, Username, Email, Password, passwordSalt, Birthday) 
+                using (var connection = new SqliteConnection(_connectionString))
+                {
+                    string sql = @"INSERT INTO user (Name, Surname, Username, Email, Password, passwordSalt, Birthday) 
                                VALUES (@Name, @Surname, @Username, @Email, @Password, @passwordSalt, @Birthday);";
 
-                connection.Execute(sql, user);
+                    int rowsAdded = await connection.ExecuteAsync(sql, user);
+
+                    return rowsAdded > 0;
+                }
+            }
+            catch (Exception ex)
+            {
+                return false;
             }
         }
 
-        public void updateUser(User user)
+        public async Task<bool> updateUserAsync(User user)
         {
-            using (var connection = new SqliteConnection(_connectionString))
+            try
             {
-                string sql = @"UPDATE user SET
+                using (var connection = new SqliteConnection(_connectionString))
+                {
+                    string sql = @"UPDATE user SET
                                Name = @Name,
                                Surname = @Surname,
                                Email = @Email,
@@ -54,7 +65,14 @@ namespace API___ASP_.NET_Core.Repositories
                                Birthday = @Birthday 
                                WHERE Id = @Id";
 
-                connection.Execute(sql, user);
+                    int rowsAffected = await connection.ExecuteAsync(sql, user);
+
+                    return rowsAffected > 0;
+                }
+            }
+            catch (Exception ex)
+            {
+                return false;
             }
         }
     }
