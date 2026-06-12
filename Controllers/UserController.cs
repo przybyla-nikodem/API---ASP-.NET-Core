@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using System.Net.Mail;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 
 namespace API___ASP_.NET_Core.Controllers
 {
@@ -20,7 +21,7 @@ namespace API___ASP_.NET_Core.Controllers
         }
 
         [HttpPost("register")]
-        public IActionResult Register([FromBody] Register newUserData)
+        public async Task <IActionResult> Register([FromBody] Register newUserData)
         {
             User dbUser;
 
@@ -39,21 +40,15 @@ namespace API___ASP_.NET_Core.Controllers
             }
 
             if (hasSpecial(newUserData.Name))
-
             {
-
                 return BadRequest(new { Message = "Niepoprawne znaki w imieniu" });
-
             }
             else if (hasSpecial(newUserData.Surname))
-
             {
-
                 return BadRequest(new { Message = "Niepoprawne znaki w nazwisku" });
-
             }
 
-            if (!DateOnly.TryParse(newUserData.Birthday, out var parsedDate))
+            if (!DateOnly.TryParseExact(newUserData.Birthday, "yyyy-MM-dd", out var parsedDate))
             {
                 return BadRequest(new { Message = "Błędny format daty. Użyj formatu YYYY-MM-DD." });
             }
@@ -82,24 +77,29 @@ namespace API___ASP_.NET_Core.Controllers
 
             try
             {
-                _userRepository.addUser(dbUser);
-                return StatusCode(StatusCodes.Status201Created, new { Message = "Rejestracja przebiegła pomyślnie" });
+                bool success = await _userRepository.addUserAsync(dbUser);
+                if(success)
+                {
+                    return StatusCode(StatusCodes.Status201Created, new { Message = "Rejestracja przebiegła pomyślnie" });
+                }
             }
-            catch
+            catch(Exception ex)
             {
                 return BadRequest(new { Message = "Rejestracja nie udała się" });
             }
+
+            return BadRequest(new { Message = "Rejestracja nie udała się" });
         }
 
         [HttpPost("login")]
-        public IActionResult Login([FromBody] Login loginData)
+        public async Task<IActionResult> Login([FromBody] Login loginData)
         {
             if (loginData == null || string.IsNullOrEmpty(loginData.Email) || string.IsNullOrEmpty(loginData.Password))
             {
                 return BadRequest(new { Message = "Email i hasło są wymagane." });
             }
 
-            User? user = _userRepository.GetByEmail(loginData.Email);
+            User? user = await _userRepository.GetByEmailAsync(loginData.Email);
 
             if (user == null)
             {
@@ -123,14 +123,19 @@ namespace API___ASP_.NET_Core.Controllers
         }
 
         [HttpPatch("edit")]
-        public IActionResult Alter([FromBody] Edit editData)
+        public async Task<IActionResult> Alter([FromBody] Edit editData)
         {
             if (editData == null || string.IsNullOrEmpty(editData.Password) || string.IsNullOrEmpty(editData.Username))
             {
                 return BadRequest(new { Message = "Hasło i nazwa użytkownika nie mogą być puste" });
             }
 
-            User? userDb = _userRepository.GetByUsername(editData.Username);
+            if (!DateOnly.TryParseExact(editData.Birthday, "yyyy-MM-dd", out var parsedDate))
+            {
+                return BadRequest(new { Message = "Błędny format daty. Użyj formatu YYYY-MM-DD." });
+            }
+
+            User? userDb = await _userRepository.GetByUsernameAsync(editData.Username);
 
             if (userDb == null) return BadRequest(new { Message = "Brak uzytkownika" });
 
@@ -185,8 +190,15 @@ namespace API___ASP_.NET_Core.Controllers
 
             try
             {
-                _userRepository.updateUser(userDb);
-                return Ok(new { Message = "Dane zmienione pomyślnie" });
+                bool success = await _userRepository.updateUserAsync(userDb);
+                if (success)
+                {
+                    return Ok(new { Message = "Dane zmienione pomyślnie" });
+                }
+                else
+                {
+                    return BadRequest($"Błąd zapisu danych do bazy");
+                }
             }
             catch (Exception ex)
             {
@@ -195,7 +207,7 @@ namespace API___ASP_.NET_Core.Controllers
         }
 
         [HttpGet("verify")]
-        public IActionResult Verify([FromHeader(Name = "Username")] string username)
+        public async Task <IActionResult> Verify([FromHeader(Name = "Username")] string username)
         {
             if (string.IsNullOrEmpty(username))
             {
@@ -204,15 +216,19 @@ namespace API___ASP_.NET_Core.Controllers
 
             try
             {
-                User? dbUser = _userRepository.GetByUsername(username);
+                User? dbUser = await _userRepository.GetByUsernameAsync(username);
 
                 if (dbUser == null)
                 {
                     return NotFound("Użytkownik nie istnieje.");
                 }
 
+                if (!DateOnly.TryParseExact(dbUser.Birthday, "yyyy-MM-dd", out var birthDay))
+                {
+                    return BadRequest(new { Message = "Niepoprawny format daty w bazie danych" });
+                }
+
                 var date = DateOnly.FromDateTime(DateTime.Today);
-                var birthDay = DateOnly.Parse(dbUser.Birthday.ToString()!);
                 int age = date.Year - birthDay.Year;
 
                 if (birthDay > date.AddYears(-age)) age--;
