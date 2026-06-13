@@ -3,6 +3,7 @@ using API___ASP_.NET_Core.Repositories;
 using API___ASP_.NET_Core.Validators;
 using FluentValidation;
 using FluentValidation.Results;
+using Mapster;
 using Microsoft.AspNetCore.Cryptography.KeyDerivation;
 using Microsoft.AspNetCore.Mvc;
 using System.Net.Mail;
@@ -26,7 +27,6 @@ namespace API___ASP_.NET_Core.Controllers
         [HttpPost("register")]
         public async Task <IActionResult> Register([FromBody] Register newUserData)
         {
-            User dbUser;
             UserRegisterValidator validator = new UserRegisterValidator();
 
             ValidationResult results = validator.Validate(newUserData);
@@ -39,16 +39,10 @@ namespace API___ASP_.NET_Core.Controllers
 
             string hashed = HashPassword(newUserData.Password!, salt);
 
-            dbUser = new User
-            {
-                Username = newUserData.Username,
-                Name = newUserData.Name,
-                Surname = newUserData.Surname,
-                Email = newUserData.Email,
-                Password = hashed,
-                passwordSalt = salt,
-                Birthday = newUserData.Birthday
-            };
+
+            User dbUser = newUserData.Adapt<User>();
+            dbUser.Password = hashed;
+            dbUser.passwordSalt = salt;
 
             try
             {
@@ -88,11 +82,15 @@ namespace API___ASP_.NET_Core.Controllers
 
             if (user.Password == hashed)
             {
+                var userResponse = user.Adapt<User>();
+                userResponse.Password = null!;
+                userResponse.passwordSalt = null!;
+
                 return Ok(new
                 {
                     Message = "Zalogowano pomyślnie",
-                    User = new { user.Id, user.Username, user.Email }
-                });
+                    User = userResponse
+            });
             }
             else
             {
@@ -143,7 +141,14 @@ namespace API___ASP_.NET_Core.Controllers
                 bool success = await _userRepository.updateUserAsync(userDb);
                 if (success)
                 {
-                    return Ok(new { Message = "Dane zmienione pomyślnie" });
+                    var userResponse = userDb.Adapt<User>();
+                    userResponse.Password = null!;
+                    userResponse.passwordSalt = null!;
+
+                    return Ok(new { 
+                        Message = "Dane zmienione pomyślnie",
+                        User = userResponse
+                    });
                 }
                 else
                 {
