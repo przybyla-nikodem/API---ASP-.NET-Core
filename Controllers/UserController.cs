@@ -7,9 +7,11 @@ using Mapster;
 using Microsoft.AspNetCore.Cryptography.KeyDerivation;
 using Microsoft.AspNetCore.Mvc;
 using System.Net.Mail;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace API___ASP_.NET_Core.Controllers
 {
@@ -200,6 +202,116 @@ namespace API___ASP_.NET_Core.Controllers
             catch
             {
                 return BadRequest(new { Message = "Nie udało się zweryfikować danych" });
+            }
+        }
+
+        [HttpPost("addfriend")]
+        public async Task<IActionResult> AddFriendAsync([FromBody] AddFriend requestData)
+        {
+            User? user = await _userRepository.GetByEmailAsync(requestData.Auth.Email);
+
+            if (user == null) 
+            {
+                return BadRequest(new { Message = "Niepoprawne dane użytkownika " });
+            }
+
+            if(HashPassword(requestData.Auth.Password, user.passwordSalt) == user.Password)
+            {
+                user.Friends ??= new List<string>();
+                requestData.FriendEmail = requestData.FriendEmail.ToLower();
+
+                if(user.Email.Equals(requestData.FriendEmail, StringComparison.OrdinalIgnoreCase))
+                {
+                    return BadRequest(new { Message = "Nie możesz dodać samego siebie do znajomych." });
+                }
+
+                if (user.Friends.Contains(requestData.FriendEmail))
+                {
+                    return BadRequest(new { Message = "Znajomy jest już dodany" });
+                }
+
+                var reciever = await _userRepository.GetByEmailAsync(requestData.FriendEmail);
+                if (reciever == null) return NotFound(new { Message = "Użytkownik o podanym adresie e-mail nie istnieje." });
+
+                int recieverId = reciever.Id;
+
+                bool success = await _userRepository.AddFriendAsync(recieverId, user.Id);
+
+                if (success)
+                {
+                    return Ok(new { Message = "Wysłano prośbę o dodanie znajomego" });
+                }
+                else
+                {
+                    return BadRequest(new { Message = "Nie udało się dodać znajomego" });
+                }
+
+            } else
+            {
+                return BadRequest(new { Message = "Błąd autoryzacji" });
+            }
+        }
+
+        [HttpPatch("acceptfriend")]
+        public async Task<IActionResult> AcceptFriendRequestAsync([FromBody] AddFriend data)
+        {
+            User? user = await _userRepository.GetByEmailAsync(data.Auth.Email);
+
+            if (user == null)
+            {
+                return BadRequest(new { Message = "Niepoprawne dane użytkownika " });
+            }
+
+            if (HashPassword(data.Auth.Password, user.passwordSalt) == user.Password)
+            {
+                var friend = await _userRepository.GetByEmailAsync(data.FriendEmail);
+                var friendId = friend.Id;
+
+                if (user.FriendRequests.Contains(friendId))
+                {
+                    bool success = await _userRepository.AcceptFriendRequestAsync(user.Id, friendId);
+
+                    if (success) return Ok(new { Message = $"Zaproszenie do znajomych od " + friend.Email + " zaakceptowane" });
+                }
+                else
+                {
+                    return BadRequest(new { Message = "To zaproszenie nie istnieje" });
+                }
+            } else
+            {
+                return BadRequest(new { Message = "Błąd autoryzacji"});
+            }
+
+            return BadRequest(new { Message = "Nie udało się zaakceptować zaproszenia" });
+        }
+
+        [HttpGet("profile")]
+        public async Task<IActionResult> GetProfile([FromHeader(Name = "Auth-Email")] string email, [FromHeader(Name = "Auth-Password")] string password)
+        {
+            if (string.IsNullOrEmpty(email) || string.IsNullOrEmpty(password))
+            {
+                return Unauthorized(new { Message = "Brak wymaganych nagłówków autoryzacyjnych." });
+            }
+
+            User? user = await _userRepository.GetByEmailAsync(email);
+
+            if (user == null) return BadRequest(new { Message = "Użytkownik nie istnieje" });
+
+            if (HashPassword(password, user.passwordSalt) == user.Password)
+            {
+                var userProfile = user.Adapt<User>();
+                userProfile.passwordSalt = null!;
+                userProfile.Password = null!;
+
+                return Ok(new
+                {
+                    Message = "Pomyślnie pobrano profil.",
+                    Profile = userProfile
+                });
+            }
+            else
+            {
+                return Unauthorized(new { Message = "Niepoprawny e-mail lub hasło." });
             }
         }
 

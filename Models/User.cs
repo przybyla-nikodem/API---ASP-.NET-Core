@@ -10,7 +10,14 @@
         public string Password { get; set; }
         public byte[] passwordSalt { get; set; }
         public string Birthday { get; set; }
+        public List<string> Friends { get; set; }
+        public List<int> FriendRequests { get; set; }
+    }
 
+    public class AddFriend
+    {
+        public required Login Auth { get; set; }
+        public required string FriendEmail { get; set; }
     }
 
     public class Register
